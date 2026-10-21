@@ -1,0 +1,22 @@
+APLICATIVO WEB (PWA) - CONTRATOS SEMCAS
+
+ESTRUTURA NO REPOSITORIO (tudo na raiz, nesta organização):
+  index.html
+  manifest.webmanifest
+  sw.js
+  icons/icon-192.png
+  icons/icon-512.png
+  icons/icon-maskable-512.png
+  icons/apple-touch-icon.png
+  icons/favicon-32.png
+
+O site precisa abrir por https:// (GitHub Pages, Firebase Hosting, Netlify...).
+Depois de publicado, adicione o dominio em Firebase > Authentication > Configuracoes > Dominios autorizados
+(ex.: seuusuario.github.io), senao o login da administradora nao funciona.
+
+INSTALAR:
+  Android (Chrome): menu ⋮ > "Instalar app" / "Adicionar à tela inicial"
+  iPhone/iPad (Safari): botão Compartilhar > "Adicionar à Tela de Início"
+  Windows (Chrome/Edge): ícone de instalar na barra de endereço, ou menu > "Instalar Contratos SEMCAS"
+
+AO PUBLICAR UMA NOVA VERSAO DO SISTEMA: aumente o numero em VERSAO no sw.js (v1 -> v2).
