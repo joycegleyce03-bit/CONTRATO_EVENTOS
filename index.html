@@ -4,17 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EventContract Hub - SEMCAS (Sistema Funcional)</title>
-    <!-- APLICATIVO WEB (PWA): instalável no Windows, Android e iOS -->
-    <link rel="manifest" href="manifest.webmanifest">
-    <meta name="theme-color" content="#0f172a">
-    <meta name="application-name" content="Contratos SEMCAS">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Contratos SEMCAS">
-    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -41,6 +30,21 @@
             table { border-collapse: collapse !important; width: 100% !important; }
             th, td { border: 1px solid #94a3b8 !important; color: #000 !important; }
             @page { margin: 1cm; size: A4; }
+
+            /* Impressão da O.S. aberta: o painel de visualização (que tem .no-print) passa a ser o único conteúdo impresso */
+            body.imprimindo-os { overflow: visible !important; height: auto !important; }
+            body.imprimindo-os #modalVisualizarOS {
+                display: block !important; position: static !important; inset: auto !important;
+                background: transparent !important; padding: 0 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+            }
+            body.imprimindo-os #modalOSContainer {
+                display: block !important; height: auto !important; max-width: none !important; width: 100% !important;
+                border-radius: 0 !important; box-shadow: none !important; overflow: visible !important;
+            }
+            body.imprimindo-os #documentoOficialOS { overflow: visible !important; height: auto !important; padding: 0 !important; }
+            body.imprimindo-os #modalSaldoInsuficiente, body.imprimindo-os #modalAlertaGeral, body.imprimindo-os #modalConfirmacaoGeral { display: none !important; }
+            body.imprimindo-os #modalVisualizarOS * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            body.imprimindo-os #documentoOficialOS tr, body.imprimindo-os #documentoOficialOS .grid > div { break-inside: avoid; }
         }
 
         .loader-wrapper { height: 160px; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 0.5rem; position: relative; }
@@ -867,12 +871,28 @@
                 </div>
 
                 <div class="border border-slate-400 rounded mb-4 overflow-hidden text-[12px]">
-                    <div class="bg-slate-100 font-bold p-2 border-b border-slate-400 uppercase text-xs">1. Dados Contratuais e Fornecedor</div>
-                    <div class="grid grid-cols-2">
-                        <div class="p-2 border-r border-b border-slate-300"><span class="font-bold mr-2">Contrato Vinculado:</span> 012/2026</div>
+                    <div class="bg-slate-100 font-bold p-2 border-b border-slate-400 uppercase text-xs flex justify-between items-center">
+                        <span>1. Dados Contratuais e Fornecedor</span>
+                        <button type="button" id="btnEditarDadosOS" onclick="abrirEdicaoDadosOS()" class="no-print no-print-pdf px-2.5 py-1 bg-white text-amber-700 border border-amber-300 hover:bg-amber-50 rounded text-[10px] font-bold normal-case transition-all">✏️ Editar</button>
+                    </div>
+                    <div class="grid grid-cols-2" id="docDadosContratuaisView">
+                        <div class="p-2 border-r border-b border-slate-300"><span class="font-bold mr-2">Contrato Vinculado:</span> <span id="docOsContrato">012/2026</span></div>
                         <div class="p-2 border-b border-slate-300"><span class="font-bold mr-2">Processo SEI:</span> <span id="docSei">---</span></div>
                         <div class="p-2 border-r border-slate-300"><span class="font-bold mr-2">Empresa Contratada:</span> <span id="docOsEmpresa">Empresa Contratada de Eventos LTDA</span></div>
                         <div class="p-2"><span class="font-bold mr-2">CNPJ:</span> <span id="docOsCnpj">12.345.678/0001-90</span></div>
+                    </div>
+                    <div id="docDadosContratuaisEdit" class="hidden no-print no-print-pdf p-3 bg-amber-50/60 space-y-3">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div><label class="block text-[10px] font-bold text-slate-600 uppercase mb-1">Contrato Vinculado</label><input type="text" id="editOsContrato" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:border-blue-500"></div>
+                            <div><label class="block text-[10px] font-bold text-slate-600 uppercase mb-1">Processo SEI <span class="normal-case font-medium text-slate-400">(somente desta O.S.)</span></label><input type="text" id="editOsSei" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:border-blue-500"></div>
+                            <div><label class="block text-[10px] font-bold text-slate-600 uppercase mb-1">Empresa Contratada</label><input type="text" id="editOsEmpresa" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:border-blue-500"></div>
+                            <div><label class="block text-[10px] font-bold text-slate-600 uppercase mb-1">CNPJ</label><input type="text" id="editOsCnpj" maxlength="18" oninput="mascararCNPJ(this)" placeholder="00.000.000/0000-00" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:border-blue-500"></div>
+                        </div>
+                        <p class="text-[10px] text-slate-500">Contrato, empresa e CNPJ são atualizados em todo o sistema (todas as O.S., ocorrências e módulo Contrato). O Processo SEI é alterado apenas nesta O.S.</p>
+                        <div class="flex justify-end gap-2">
+                            <button type="button" onclick="cancelarEdicaoDadosOS()" class="px-4 py-1.5 bg-white text-slate-600 border border-slate-300 hover:bg-slate-100 rounded-lg text-xs font-bold">Cancelar</button>
+                            <button type="button" onclick="salvarDadosContratuaisOS()" class="px-5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm">Salvar</button>
+                        </div>
                     </div>
                 </div>
 
@@ -2353,6 +2373,8 @@
 
             document.getElementById('docNumeroOS').innerText = `ORDEM DE SERVIÇO Nº ${os.numero}`;
             document.getElementById('docSei').innerText = os.processoSei;
+            document.getElementById('docOsContrato').innerText = dadosContratoGeral.numero;
+            cancelarEdicaoDadosOS();
             document.getElementById('docEvento').innerText = os.evento;
             document.getElementById('docSetor').innerText = os.setor || 'N/I';
             document.getElementById('docClassificacao').innerText = os.classificacao;
@@ -2397,8 +2419,59 @@
             osVisualizadaAberta = null;
         }
 
-        function imprimirOS() { window.print(); }
-        function imprimirOSDireto(id) { abrirModalOS(id); setTimeout(() => window.print(), 300); }
+        // ---------- Edição dos Dados Contratuais e do Fornecedor (tela de visualização da O.S.) ----------
+        function abrirEdicaoDadosOS() {
+            if(!osVisualizadaAberta) return;
+            document.getElementById('editOsContrato').value = dadosContratoGeral.numero || '';
+            document.getElementById('editOsSei').value = osVisualizadaAberta.processoSei || '';
+            document.getElementById('editOsEmpresa').value = dadosFornecedor.razaoSocial || '';
+            document.getElementById('editOsCnpj').value = dadosFornecedor.cnpj || '';
+            document.getElementById('docDadosContratuaisView').classList.add('hidden');
+            document.getElementById('docDadosContratuaisEdit').classList.remove('hidden');
+            document.getElementById('btnEditarDadosOS').classList.add('hidden');
+        }
+        function cancelarEdicaoDadosOS() {
+            const ed = document.getElementById('docDadosContratuaisEdit');
+            if(!ed) return;
+            ed.classList.add('hidden');
+            document.getElementById('docDadosContratuaisView').classList.remove('hidden');
+            document.getElementById('btnEditarDadosOS').classList.remove('hidden');
+        }
+        function salvarDadosContratuaisOS() {
+            if(!osVisualizadaAberta) return;
+            const contrato = document.getElementById('editOsContrato').value.trim();
+            const sei = document.getElementById('editOsSei').value.trim();
+            const empresa = document.getElementById('editOsEmpresa').value.trim();
+            const cnpj = document.getElementById('editOsCnpj').value.trim();
+            if(!contrato || !sei || !empresa) { mostrarAlerta('Preencha Contrato Vinculado, Processo SEI e Empresa Contratada.', 'Campos Obrigatórios'); return; }
+            if(cnpj && cnpj.replace(/\D/g, '').length !== 14) { mostrarAlerta('O CNPJ deve ter 14 dígitos (00.000.000/0000-00).', 'CNPJ Inválido'); return; }
+            const id = osVisualizadaAberta.id;
+            const os = ordensDeServico.find(o => o.id === id);
+            if(!os) return;
+
+            dadosContratoGeral.numero = contrato;           // contrato vinculado (global)
+            salvarBancoContrato();
+            dadosFornecedor.razaoSocial = empresa;          // empresa e CNPJ (globais)
+            dadosFornecedor.cnpj = cnpj;
+            salvarBancoFornecedor();
+            os.processoSei = sei;                           // SEI apenas desta O.S.
+            salvarBancoOS();
+
+            atualizarInterfaceContrato();
+            atualizarInterfaceFornecedor();
+            renderizarGestaoOS();
+            abrirModalOS(id);                               // recarrega a visualização com os dados novos
+            mostrarAlerta('Dados contratuais e do fornecedor atualizados com sucesso!', 'Dados Atualizados');
+        }
+
+        function imprimirOS() {
+            if(!osVisualizadaAberta) return;
+            document.body.classList.add('imprimindo-os');
+            const limpar = () => { document.body.classList.remove('imprimindo-os'); window.removeEventListener('afterprint', limpar); };
+            window.addEventListener('afterprint', limpar);
+            setTimeout(() => window.print(), 150);
+        }
+        function imprimirOSDireto(id) { abrirModalOS(id); setTimeout(imprimirOS, 300); }
 
         function gerarPDFoficial() {
             if(!osVisualizadaAberta) return;
@@ -2920,6 +2993,7 @@
         body.modo-visitante [onclick*="editarOS("],
         body.modo-visitante [onclick*="cancelarOS("],
         body.modo-visitante [onclick*="excluirOS("],
+        body.modo-visitante [onclick*="abrirEdicaoDadosOS("],
         body.modo-visitante [onclick*="editarOcorrencia("],
         body.modo-visitante [onclick*="abrirModalNovaOcorrencia("],
         body.modo-visitante [onclick*="habilitarEdicaoContrato("],
@@ -3410,7 +3484,7 @@
 
         // Funções que alteram dados: só a administradora autenticada pode executá-las
         const PROTEGIDAS = ['habilitarEdicaoContrato','salvarEdicaoContrato','habilitarEdicaoFornecedor','salvarEdicaoFornecedor',
-            'editarOS','prosseguirEdicaoOS','salvarNovaOS','executarSalvamentoOS','cancelarOS','excluirOS','adicionarLinhaOS','removerLinhaOS','limparFormularioOS',
+            'editarOS','prosseguirEdicaoOS','salvarNovaOS','executarSalvamentoOS','cancelarOS','excluirOS','abrirEdicaoDadosOS','salvarDadosContratuaisOS','adicionarLinhaOS','removerLinhaOS','limparFormularioOS',
             'abrirModalNovaOcorrencia','editarOcorrencia','salvarOcorrencia',
             'finAbrirEdicao','finSalvarEdicao','finVoltarAutomatico','finRegistrarEmpenho','finSalvarEdicaoEmpenho','finExcluirEmpenho'];
         const SILENCIOSAS = ['salvarBancoOS','salvarBancoOcorrencias','salvarBancoContrato','salvarBancoFornecedor','finSalvar'];
@@ -3456,12 +3530,6 @@
             });
         };
         document.body.classList.add('modo-visitante');   // padrão seguro até a administradora entrar
-    </script>
-    <script>
-        // Registro do aplicativo web (funciona apenas em endereço https:// ou localhost)
-        if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-            window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(err => console.warn('PWA:', err)); });
-        }
     </script>
 </body>
 </html>
