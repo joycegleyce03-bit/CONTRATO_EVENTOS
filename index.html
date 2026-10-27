@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     
     <style>
         body { box-sizing: border-box; font-size: 15px; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
@@ -2473,19 +2474,218 @@
         }
         function imprimirOSDireto(id) { abrirModalOS(id); setTimeout(imprimirOS, 300); }
 
-        function gerarPDFoficial() {
+        // =====================================================================
+        // GERAÇÃO DO PDF DA ORDEM DE SERVIÇO (A4, retrato, quebra automática de páginas)
+        // O PDF é montado diretamente a partir dos dados exibidos na visualização (texto real, sem "foto da tela"),
+        // por isso nada é cortado: tabelas e textos longos continuam nas páginas seguintes.
+        // =====================================================================
+        async function gerarPDFoficial() {
             if(!osVisualizadaAberta) return;
-            const element = document.getElementById('documentoOficialOS');
-            document.getElementById('blocoIntegracaoOS').style.display = 'none';
-            const opt = {
-                margin: 10, filename: `SEMCAS_${osVisualizadaAberta.numero.replace('/','_')}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
-            html2pdf().set(opt).from(element).save().then(() => {
-                document.getElementById('blocoIntegracaoOS').style.display = 'flex';
-            });
+            if(typeof PDFLib === 'undefined') {
+                mostrarAlerta('Não foi possível carregar o gerador de PDF (verifique a conexão com a internet). Como alternativa, use o botão Imprimir e escolha "Salvar como PDF".', 'PDF Indisponível');
+                return;
+            }
+            try {
+                const os = osVisualizadaAberta;
+                const { PDFDocument, StandardFonts, rgb } = PDFLib;
+                const pdf = await PDFDocument.create();
+                const F = await pdf.embedFont(StandardFonts.Helvetica);
+                const FB = await pdf.embedFont(StandardFonts.HelveticaBold);
+                const FI = await pdf.embedFont(StandardFonts.HelveticaOblique);
+
+                const W = 595.28, H = 841.89, M = 42, CW = W - 2 * M, TOPO = H - 42, BASE = 56;
+                const PRETO = rgb(0.06, 0.09, 0.16), CINZA = rgb(0.39, 0.45, 0.55), BORDA = rgb(0.58, 0.64, 0.72);
+                const FUNDO = rgb(0.945, 0.961, 0.976), AMBAR = rgb(1, 0.98, 0.92), BORDA_AMBAR = rgb(0.96, 0.78, 0.35);
+                const PAD = 5, LH = 12.5;
+
+                // Textos: só caracteres suportados pela fonte padrão do PDF (Latin-1 / acentuação do português)
+                const limpar = t => String(t == null ? '' : t).normalize('NFC').replace(/\u2212/g, '-').replace(/\u2192/g, '->').replace(/[\r\t]/g, ' ')
+                    .replace(/[^\n\x20-\x7E\xA0-\xFF\u2013\u2014\u2018\u2019\u201C\u201D\u2022\u2026\u20AC]/g, '?');
+                const dom = id => { const el = document.getElementById(id); return limpar(el ? el.innerText.trim() : '') || '--'; };
+
+                function quebrar(texto, font, size, maxW) {
+                    const out = [];
+                    String(texto).split('\n').forEach(par => {
+                        const palavras = par.split(/\s+/).filter(Boolean);
+                        if(!palavras.length) { out.push(''); return; }
+                        let linha = '';
+                        palavras.forEach(p => {
+                            while(font.widthOfTextAtSize(p, size) > maxW) {          // palavra maior que a largura: quebra em pedaços
+                                let i = p.length;
+                                while(i > 1 && font.widthOfTextAtSize(p.slice(0, i), size) > maxW) i--;
+                                if(linha) { out.push(linha); linha = ''; }
+                                out.push(p.slice(0, i)); p = p.slice(i);
+                            }
+                            const t = linha ? linha + ' ' + p : p;
+                            if(font.widthOfTextAtSize(t, size) <= maxW) linha = t; else { out.push(linha); linha = p; }
+                        });
+                        if(linha) out.push(linha);
+                    });
+                    return out;
+                }
+
+                let page, y;
+                const novaPagina = () => { page = pdf.addPage([W, H]); y = TOPO; };
+                const garantir = h => { if(y - h < BASE) novaPagina(); };
+                const centro = (t, font, size, yy) => page.drawText(t, { x: (W - font.widthOfTextAtSize(t, size)) / 2, y: yy, size, font, color: PRETO });
+
+                // Linha de uma grade: várias células lado a lado; continua na página seguinte se for longa
+                // cel: { x, w, linhas: [{t, f, s, c}], fundo }
+                function linhaGrade(cels, minLinhasIniciais) {
+                    let pos = cels.map(() => 0);
+                    const total = Math.max(...cels.map(c => c.linhas.length));
+                    let primeira = true;
+                    while(pos.some((p, i) => p < cels[i].linhas.length)) {
+                        const cabem = Math.floor((y - BASE - 2 * PAD) / LH);
+                        const exigido = primeira ? Math.min(total, minLinhasIniciais || 2) : 1;
+                        if(cabem < exigido) { novaPagina(); continue; }
+                        const n = Math.max(1, Math.min(cabem, Math.max(...cels.map((c, i) => c.linhas.length - pos[i]))));
+                        const alt = n * LH + 2 * PAD;
+                        cels.forEach((c, i) => {
+                            page.drawRectangle({ x: c.x, y: y - alt, width: c.w, height: alt, borderColor: BORDA, borderWidth: 0.7, color: c.fundo });
+                            c.linhas.slice(pos[i], pos[i] + n).forEach((l, k) => {
+                                page.drawText(l.t, { x: c.x + PAD, y: y - PAD - (k + 1) * LH + 3.6, size: l.s, font: l.f, color: l.c || PRETO });
+                            });
+                            pos[i] += n;
+                        });
+                        y -= alt;
+                        primeira = false;
+                    }
+                }
+                const celula = (x, w, label, valor, opc = {}) => ({
+                    x, w, fundo: opc.fundo,
+                    linhas: [{ t: limpar(label), f: FB, s: 8, c: CINZA }]
+                        .concat(quebrar(limpar(valor), opc.italico ? FI : F, 10, w - 2 * PAD).map(t => ({ t, f: opc.italico ? FI : F, s: 10 })))
+                });
+                const meio = M + CW / 2, MW = CW / 2;
+                const titulo = t => {
+                    garantir(LH + 2 * PAD + 3 * LH);
+                    linhaGrade([{ x: M, w: CW, fundo: FUNDO, linhas: [{ t: limpar(t).toUpperCase(), f: FB, s: 9.5 }] }]);
+                };
+
+                // ---------- Cabeçalho ----------
+                novaPagina();
+                centro('PREFEITURA MUNICIPAL DE SÃO LUÍS', FB, 14, y - 12);
+                centro('SECRETARIA MUNICIPAL DA CRIANÇA E ASSISTÊNCIA SOCIAL – SEMCAS', FB, 10, y - 28);
+                const numTxt = dom('docNumeroOS').toUpperCase();
+                const numW = FB.widthOfTextAtSize(numTxt, 15) + 50;
+                page.drawRectangle({ x: (W - numW) / 2, y: y - 66, width: numW, height: 26, color: FUNDO, borderColor: BORDA, borderWidth: 0.8 });
+                centro(numTxt, FB, 15, y - 58.5);
+                page.drawLine({ start: { x: M, y: y - 78 }, end: { x: M + CW, y: y - 78 }, thickness: 1.6, color: PRETO });
+                y -= 92;
+
+                // ---------- 1. Dados contratuais e fornecedor ----------
+                titulo('1. Dados Contratuais e Fornecedor');
+                linhaGrade([celula(M, MW, 'Contrato Vinculado', dom('docOsContrato')), celula(meio, MW, 'Processo SEI', dom('docSei'))]);
+                linhaGrade([celula(M, MW, 'Empresa Contratada', dom('docOsEmpresa')), celula(meio, MW, 'CNPJ', dom('docOsCnpj'))]);
+                y -= 14;
+
+                // ---------- 2. Especificações do evento ----------
+                titulo('2. Especificações do Evento / Ação');
+                linhaGrade([celula(M, CW, 'Evento / Ação', dom('docEvento'))]);
+                linhaGrade([celula(M, MW, 'Setor Solicitante', dom('docSetor')), celula(meio, MW, 'Classificação', dom('docClassificacao'))]);
+                linhaGrade([celula(M, MW, 'Data de Execução', dom('docData')), celula(meio, MW, 'Horário', dom('docHorario'))]);
+                linhaGrade([celula(M, CW, 'Local de Execução', dom('docLocal'))]);
+                linhaGrade([celula(M, CW, 'Observações / Justificativa', dom('docObs'), { italico: true })]);
+                y -= 14;
+
+                // ---------- 3. Itens (cabeçalho da tabela se repete em cada página) ----------
+                garantir(40 + 3 * LH);
+                page.drawText('3. RELAÇÃO DE ITENS SOLICITADOS (CATÁLOGO)', { x: M, y: y - 9, size: 9.5, font: FB, color: PRETO });
+                y -= 16;
+                const col = [48, 213, 40, 40, 80, 90];                       // soma = 511 = CW
+                const cx = []; col.reduce((a, w, i) => { cx[i] = a; return a + w; }, M);
+                const cab = ['Item', 'Descrição da Categoria', 'Unid.', 'Qtd.', 'V. Unitário', 'Subtotal'];
+                const alinh = ['l', 'l', 'c', 'c', 'r', 'r'];
+                const textoCel = (t, font, size, i, yy) => {
+                    const w = font.widthOfTextAtSize(t, size);
+                    const x = alinh[i] === 'r' ? cx[i] + col[i] - PAD - w : alinh[i] === 'c' ? cx[i] + (col[i] - w) / 2 : cx[i] + PAD;
+                    page.drawText(t, { x, y: yy, size, font, color: PRETO });
+                };
+                const desenharCabecalhoTabela = () => {
+                    const alt = 20;
+                    cab.forEach((t, i) => {
+                        page.drawRectangle({ x: cx[i], y: y - alt, width: col[i], height: alt, color: FUNDO, borderColor: BORDA, borderWidth: 0.7 });
+                        textoCel(limpar(t), FB, 8.5, i, y - 13.5);
+                    });
+                    y -= alt;
+                };
+                garantir(20 + 40);
+                desenharCabecalhoTabela();
+                (os.itens || []).forEach(item => {
+                    const nome = quebrar(limpar(item.nome), F, 9, col[1] - 2 * PAD);
+                    const catg = quebrar(limpar(String(item.categoria || '').toUpperCase()), F, 7, col[1] - 2 * PAD);
+                    const linhas = nome.length + catg.length;
+                    const alt = Math.max(24, linhas * 11 + 2 * PAD);
+                    if(y - alt < BASE) { novaPagina(); desenharCabecalhoTabela(); }
+                    cx.forEach((x, i) => page.drawRectangle({ x, y: y - alt, width: col[i], height: alt, borderColor: BORDA, borderWidth: 0.7 }));
+                    const topo = y - PAD - 8;
+                    textoCel(limpar(item.codigo), FB, 9, 0, topo);
+                    nome.forEach((l, k) => page.drawText(l, { x: cx[1] + PAD, y: topo - k * 11, size: 9, font: F, color: PRETO }));
+                    catg.forEach((l, k) => page.drawText(l, { x: cx[1] + PAD, y: topo - (nome.length + k) * 11 + 1, size: 7, font: F, color: CINZA }));
+                    textoCel(limpar(item.unidade), F, 8.5, 2, topo);
+                    textoCel(limpar(item.quantidade), FB, 9, 3, topo);
+                    textoCel(limpar(formatarMoeda(item.valorUnitario)), F, 9, 4, topo);
+                    textoCel(limpar(formatarMoeda(item.valorTotal)), FB, 9, 5, topo);
+                    y -= alt;
+                });
+                if(y - 26 < BASE) { novaPagina(); desenharCabecalhoTabela(); }
+                const wTot = col.slice(0, 5).reduce((a, b) => a + b, 0);
+                page.drawRectangle({ x: M, y: y - 26, width: wTot, height: 26, color: FUNDO, borderColor: BORDA, borderWidth: 0.7 });
+                page.drawRectangle({ x: cx[5], y: y - 26, width: col[5], height: 26, color: FUNDO, borderColor: BORDA, borderWidth: 0.7 });
+                const rot = 'VALOR TOTAL DA ORDEM DE SERVIÇO:';
+                page.drawText(rot, { x: M + wTot - PAD - 4 - FB.widthOfTextAtSize(rot, 9.5), y: y - 17, size: 9.5, font: FB, color: PRETO });
+                const totTxt = limpar(dom('docTotalGeral'));
+                page.drawText(totTxt, { x: cx[5] + col[5] - PAD - FB.widthOfTextAtSize(totTxt, 10.5), y: y - 17.5, size: 10.5, font: FB, color: PRETO });
+                y -= 26 + 16;
+
+                // ---------- Histórico de edições (se houver) ----------
+                if(os.historicoAlteracoes && os.historicoAlteracoes.length > 0) {
+                    const logs = [{ t: 'HISTÓRICO DE EDIÇÕES E ALTERAÇÕES', f: FB, s: 8.5, c: rgb(0.57, 0.25, 0.05) }];
+                    os.historicoAlteracoes.forEach(l => {
+                        const txt = new DOMParser().parseFromString(String(l), 'text/html').body.textContent;   // remove marcações HTML do registro sem executá-las
+                        quebrar('- ' + limpar(txt), F, 9, CW - 2 * PAD).forEach(t => logs.push({ t, f: F, s: 9 }));
+                    });
+                    garantir(4 * LH + 2 * PAD);
+                    linhaGrade([{ x: M, w: CW, fundo: AMBAR, linhas: logs }], 3);
+                    y -= 14;
+                }
+
+                // ---------- Situação da O.S. ----------
+                linhaGrade([celula(M, MW, 'Status Atual', dom('docStatusBadge')), celula(meio, MW, 'Emissor Original', dom('docEmissor'))]);
+
+                // ---------- Assinaturas ----------
+                garantir(80);
+                y -= 44;
+                const assin = (xc, t1, t2) => {
+                    page.drawLine({ start: { x: xc - 110, y }, end: { x: xc + 110, y }, thickness: 0.8, color: PRETO });
+                    [[t1, FB, 10, 13], [t2, F, 8.5, 26]].forEach(([t, f, s, d]) => page.drawText(limpar(t), { x: xc - f.widthOfTextAtSize(limpar(t), s) / 2, y: y - d, size: s, font: f, color: PRETO }));
+                };
+                assin(M + CW * 0.25, 'Responsável pela Emissão', 'SEMCAS - São Luís/MA');
+                assin(M + CW * 0.75, 'Gestor / Fiscal do Contrato', 'Visto de Aprovação');
+
+                // ---------- Rodapé em todas as páginas ----------
+                const paginas = pdf.getPages();
+                const hoje = new Date().toLocaleDateString('pt-BR');
+                paginas.forEach((pg, i) => {
+                    pg.drawLine({ start: { x: M, y: 40 }, end: { x: M + CW, y: 40 }, thickness: 0.5, color: BORDA });
+                    pg.drawText(limpar(`SEMCAS - ${numTxt} - Emitido em ${hoje}`), { x: M, y: 28, size: 8, font: F, color: CINZA });
+                    const pt = `Página ${i + 1} de ${paginas.length}`;
+                    pg.drawText(pt, { x: M + CW - F.widthOfTextAtSize(pt, 8), y: 28, size: 8, font: F, color: CINZA });
+                });
+
+                pdf.setTitle(limpar(numTxt)); pdf.setSubject('Ordem de Serviço - SEMCAS'); pdf.setCreator('EventContract Hub - SEMCAS');
+                const bytes = await pdf.save();
+                const blob = new Blob([bytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = `SEMCAS_${String(os.numero).replace(/[\/\\:*?"<>|]/g, '_')}.pdf`;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 30000);
+            } catch(e) {
+                console.error('Erro ao gerar PDF da O.S.', e);
+                mostrarAlerta('Ocorreu um erro ao gerar o PDF. Tente novamente ou use o botão Imprimir e escolha "Salvar como PDF".', 'Erro no PDF');
+            }
         }
 
         function calcularCorProximidade(dataEventoStr) {
